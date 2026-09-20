@@ -70,6 +70,21 @@ header.masthead{
   font-weight:600;
 }
 
+.section-label.with-action{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  margin-top:46px;
+}
+.section-label.with-action button{
+  padding:5px 12px;
+  font-size:12px;
+}
+.day-toggle{
+  padding:6px 10px;
+  font-size:12px;
+}
 .section-label{
   font-size:12px;
   font-weight:600;

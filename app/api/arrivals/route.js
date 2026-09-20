@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getArrivals } from '../../../lib/lta';
 
 // GET /api/arrivals?stopCode=83139
 // Proxies LTA DataMall's v3 BusArrival endpoint so the AccountKey never
@@ -15,35 +16,9 @@ export async function GET(request) {
     );
   }
 
-  const key = process.env.LTA_ACCOUNT_KEY;
-  if (!key) {
-    return NextResponse.json(
-      { error: 'LTA_ACCOUNT_KEY is not set on the server.' },
-      { status: 500 }
-    );
-  }
-
   try {
-    const res = await fetch(
-      `https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival?BusStopCode=${encodeURIComponent(
-        stopCode
-      )}`,
-      {
-        headers: { AccountKey: key, accept: 'application/json' },
-        cache: 'no-store',
-      }
-    );
-
-    if (!res.ok) {
-      const text = await res.text();
-      return NextResponse.json(
-        { error: `LTA DataMall returned HTTP ${res.status}: ${text.slice(0, 200)}` },
-        { status: 502 }
-      );
-    }
-
-    const data = await res.json();
-    return NextResponse.json({ services: data.Services || [] });
+    const services = await getArrivals(stopCode);
+    return NextResponse.json({ services });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 502 });
   }

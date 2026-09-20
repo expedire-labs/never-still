@@ -2,7 +2,17 @@ import './globals.css';
 
 export const metadata = {
   title: 'The Departure Board — live bus arrivals',
-  description: "Live Singapore bus arrivals via LTA DataMall.",
+  description: 'Live Singapore bus arrivals via LTA DataMall.',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Departures',
+  },
+};
+
+export const viewport = {
+  themeColor: '#15171c',
 };
 
 export default function RootLayout({ children }) {
@@ -15,6 +25,7 @@ export default function RootLayout({ children }) {
           href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap"
           rel="stylesheet"
         />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
       <body>{children}</body>
     </html>

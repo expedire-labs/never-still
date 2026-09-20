@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { enablePush, pushStatus, isStandalone } from '../lib/pushClient';
 
 const REFRESH_MS = 30000;
 const LOAD_LABEL = { SEA: 'Seats available', SDA: 'Standing available', LSD: 'Limited standing' };
 const TYPE_LABEL = { SD: 'Single deck', DD: 'Double deck', BD: 'Bendy' };
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function minutesUntil(iso) {
   if (!iso) return null;
@@ -265,6 +267,223 @@ function StopModal({ mode, initial, onCancel, onSave }) {
   );
 }
 
+function NotificationModal({ stopOptions, stopCache, onCancel, onSave }) {
+  const [name, setName] = useState('');
+  const [days, setDays] = useState([]);
+  const [time, setTime] = useState('18:00');
+  const [stopCode, setStopCode] = useState(stopOptions[0]?.code || '');
+  const [serviceNo, setServiceNo] = useState('');
+  const [walkMinutes, setWalkMinutes] = useState('5');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const firstFieldRef = useRef(null);
+
+  useEffect(() => {
+    firstFieldRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onCancel();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const serviceOptions = (stopCache[stopCode]?.services || [])
+    .map((s) => s.ServiceNo)
+    .filter(Boolean)
+    .filter((v, i, arr) => arr.indexOf(v) === i)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  function toggleDay(d) {
+    setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError('');
+    if (!name.trim()) return setError('Give the notification a name.');
+    if (days.length === 0) return setError('Pick at least one day.');
+    if (!stopCode) return setError('Choose a bus stop.');
+    if (!serviceNo) return setError('Choose a bus service.');
+    const walk = Number(walkMinutes);
+    if (!Number.isFinite(walk) || walk < 0) {
+      return setError('Walking time must be a number of minutes.');
+    }
+
+    setSaving(true);
+    try {
+      await onSave({ name: name.trim(), days, timeOfDay: time, stopCode, serviceNo, walkMinutes: walk });
+    } catch (err) {
+      setError(err.message || 'Could not save that notification.');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="notif-modal-title">
+        <div className="modal-head">
+          <div>
+            <div className="stop-eyebrow">New notification</div>
+            <div id="notif-modal-title" className="modal-title">
+              Leave-now alert
+            </div>
+          </div>
+          <button type="button" className="modal-close" aria-label="Close" onClick={onCancel}>
+            ×
+          </button>
+        </div>
+
+        <form className="modal-form" onSubmit={handleSubmit}>
+          <div className="field">
+            <label htmlFor="notifName">Name</label>
+            <input
+              id="notifName"
+              ref={firstFieldRef}
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Bus home at 6pm"
+              required
+            />
+          </div>
+
+          <div className="field">
+            <label>Days</label>
+            <div className="field-row">
+              {DAY_LABELS.map((label, idx) => (
+                <button
+                  type="button"
+                  key={label}
+                  className={`day-toggle ${days.includes(idx) ? '' : 'secondary'}`}
+                  onClick={() => toggleDay(idx)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor="notifTime">Time</label>
+            <input id="notifTime" type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
+          </div>
+
+          <div className="field">
+            <label htmlFor="notifStop">Bus stop</label>
+            <select
+              id="notifStop"
+              value={stopCode}
+              onChange={(e) => {
+                setStopCode(e.target.value);
+                setServiceNo('');
+              }}
+              required
+            >
+              <option value="" disabled>
+                Choose a watched stop…
+              </option>
+              {stopOptions.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.label ? `${s.label} (${s.code})` : s.code}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="notifService">Bus service</label>
+            <select
+              id="notifService"
+              value={serviceNo}
+              onChange={(e) => setServiceNo(e.target.value)}
+              required
+              disabled={serviceOptions.length === 0}
+            >
+              <option value="" disabled>
+                {serviceOptions.length === 0 ? 'Refreshing this stop’s services…' : 'Choose a service…'}
+              </option>
+              {serviceOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="notifWalk">Walking time to the stop (minutes)</label>
+            <input
+              id="notifWalk"
+              type="text"
+              inputMode="numeric"
+              value={walkMinutes}
+              onChange={(e) => setWalkMinutes(e.target.value)}
+              placeholder="5"
+              required
+            />
+          </div>
+
+          {error && (
+            <p className="form-note" style={{ color: 'var(--red)' }}>
+              {error}
+            </p>
+          )}
+          <p className="form-note">
+            We&apos;ll start watching this service at the time above and notify you the moment you need to
+            leave to catch it, allowing a fixed 3-minute buffer on top of your walk.
+          </p>
+
+          <div className="modal-actions">
+            <button type="button" className="secondary" onClick={onCancel} disabled={saving}>
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Save notification'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function NotificationRow({ n, onToggle, onDelete }) {
+  const dayText = [...n.days].sort((a, b) => a - b).map((d) => DAY_LABELS[d]).join(', ');
+  const time = (n.time_of_day || '').slice(0, 5);
+
+  return (
+    <div className="stop-group">
+      <div className="stop-head">
+        <div>
+          <div className="stop-eyebrow">
+            {dayText} · {time}
+            {!n.enabled && ' · Disabled'}
+          </div>
+          <div className="stop-title">
+            {n.name} <span className="code">{n.service_no} @ {n.stop_code}</span>
+          </div>
+        </div>
+        <div className="stop-actions">
+          <button type="button" className="secondary" onClick={() => onToggle(n)}>
+            {n.enabled ? 'Disable' : 'Enable'}
+          </button>
+          <button type="button" className="secondary" onClick={() => onDelete(n.id)}>
+            Delete
+          </button>
+        </div>
+      </div>
+      <p className="form-note" style={{ marginTop: 10 }}>
+        {n.walk_minutes} min walk + 3 min buffer · watches for {n.monitor_minutes ?? 45} min from the start
+        time
+      </p>
+    </div>
+  );
+}
+
 const EMPTY_MODAL_FIELDS = { stopCode: '', servicesText: '', label: '' };
 
 export default function Page() {
@@ -274,8 +493,74 @@ export default function Page() {
   const [now, setNow] = useState(new Date());
   const [nextRefreshAt, setNextRefreshAt] = useState(null);
   const [modal, setModal] = useState(null); // { mode: 'add' | 'edit', code, initial }
+  const [notifications, setNotifications] = useState([]);
+  const [notificationsLoaded, setNotificationsLoaded] = useState(false);
+  const [notifModalOpen, setNotifModalOpen] = useState(false);
+  const [pushState, setPushState] = useState('checking');
+  const [pushError, setPushError] = useState('');
   const stopCacheRef = useRef(stopCache);
   stopCacheRef.current = stopCache;
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/notifications');
+        const data = await res.json();
+        if (res.ok) setNotifications(data.notifications || []);
+      } catch (e) {
+        // network error on first load — empty state will show
+      } finally {
+        setNotificationsLoaded(true);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setPushState(await pushStatus());
+      } catch (e) {
+        setPushState('unsupported');
+      }
+    })();
+  }, []);
+
+  async function handleEnablePush() {
+    setPushError('');
+    try {
+      await enablePush();
+      setPushState('subscribed');
+    } catch (err) {
+      setPushError(err.message);
+      setPushState((s) => (s === 'subscribed' ? s : 'not-subscribed'));
+    }
+  }
+
+  async function handleSaveNotification(payload) {
+    const res = await fetch('/api/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not save that notification.');
+    setNotifications((prev) => [...prev, data.notification]);
+    setNotifModalOpen(false);
+  }
+
+  async function toggleNotification(n) {
+    setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, enabled: !n.enabled } : x)));
+    await fetch(`/api/notifications/${n.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !n.enabled }),
+    });
+  }
+
+  async function deleteNotification(id) {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    await fetch(`/api/notifications/${id}`, { method: 'DELETE' });
+  }
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -419,6 +704,19 @@ export default function Page() {
 
   const secsLeft = nextRefreshAt ? Math.max(0, Math.round((nextRefreshAt - now.getTime()) / 1000)) : null;
 
+  const stopOptionsForNotif = order.map((code) => {
+    const labeled = byStop[code].find((w) => w.label);
+    return { code, label: labeled?.label || '' };
+  });
+
+  const pushStatusText = {
+    checking: 'Checking notification status…',
+    subscribed: 'Push notifications are on for this device.',
+    denied: 'Notifications are blocked — allow them in Settings to use this.',
+    unsupported: 'This browser doesn’t support push notifications.',
+    'not-subscribed': 'Push notifications are off for this device.',
+  }[pushState];
+
   return (
     <div className="wrap">
       <header className="masthead">
@@ -474,6 +772,47 @@ export default function Page() {
         />
       ))}
 
+      <div className="refresh-strip">
+        <div className="status">
+          <span className="dot" />
+          {pushStatusText}
+        </div>
+        {pushState !== 'subscribed' && pushState !== 'unsupported' && pushState !== 'denied' && (
+          <button type="button" className="secondary" onClick={handleEnablePush}>
+            Enable push notifications
+          </button>
+        )}
+      </div>
+      {pushError && (
+        <p className="form-note" style={{ color: 'var(--red)' }}>
+          {pushError}
+        </p>
+      )}
+      {!isStandalone() && pushState !== 'unsupported' && pushState !== 'subscribed' && (
+        <p className="form-note">
+          On iPhone, add this page to your Home Screen first (Share → Add to Home Screen) and open it from
+          there — Safari only allows push notifications for installed web apps.
+        </p>
+      )}
+
+      <div className="section-label with-action">
+        <span>Leave-now notifications</span>
+        <button type="button" onClick={() => setNotifModalOpen(true)} disabled={order.length === 0}>
+          + Add notification
+        </button>
+      </div>
+
+      {order.length === 0 && (
+        <p className="form-note">Add a stop above before setting up a leave-now notification.</p>
+      )}
+      {notificationsLoaded && notifications.length === 0 && order.length > 0 && (
+        <p className="form-note">No notifications set up yet.</p>
+      )}
+
+      {notifications.map((n) => (
+        <NotificationRow key={n.id} n={n} onToggle={toggleNotification} onDelete={deleteNotification} />
+      ))}
+
       <footer>
         Data via LTA DataMall&apos;s v3 Bus Arrival service. Arrival times are estimates supplied by the
         operators and can change. Your watch list is stored in Supabase; the LTA account key stays on the
@@ -486,6 +825,15 @@ export default function Page() {
           initial={modal.initial}
           onCancel={() => setModal(null)}
           onSave={handleModalSave}
+        />
+      )}
+
+      {notifModalOpen && (
+        <NotificationModal
+          stopOptions={stopOptionsForNotif}
+          stopCache={stopCache}
+          onCancel={() => setNotifModalOpen(false)}
+          onSave={handleSaveNotification}
         />
       )}
     </div>
