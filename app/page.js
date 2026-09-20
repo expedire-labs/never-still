@@ -67,7 +67,7 @@ function ServiceRow({ svc }) {
   );
 }
 
-function StopGroup({ code, group, stopCache, onRemove }) {
+function StopGroup({ code, group, stopCache, onRemove, onEdit }) {
   const labeled = group.find((w) => w.label);
   const seen = new Set();
   const rows = [];
@@ -124,6 +124,9 @@ function StopGroup({ code, group, stopCache, onRemove }) {
           </div>
         </div>
         <div className="stop-actions">
+          <button type="button" className="secondary" onClick={() => onEdit(code, group)}>
+            Edit
+          </button>
           <button type="button" className="secondary" onClick={() => onRemove(code)}>
             Remove stop
           </button>
@@ -143,16 +146,134 @@ function StopGroup({ code, group, stopCache, onRemove }) {
   );
 }
 
+function StopModal({ mode, initial, onCancel, onSave }) {
+  const [stopCode, setStopCode] = useState(initial.stopCode);
+  const [servicesText, setServicesText] = useState(initial.servicesText);
+  const [label, setLabel] = useState(initial.label);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const firstFieldRef = useRef(null);
+
+  useEffect(() => {
+    firstFieldRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onCancel();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError('');
+    const code = stopCode.trim();
+    if (!/^\d{3,5}$/.test(code)) {
+      setError('Bus stop codes are 3–5 digit numbers, e.g. 83139.');
+      return;
+    }
+    const services = Array.from(
+      new Set(
+        servicesText
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    );
+    setSaving(true);
+    try {
+      await onSave({ stopCode: code, services, label: label.trim() });
+    } catch (err) {
+      setError(err.message || 'Could not save that stop.');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div className="modal-head">
+          <div>
+            <div className="stop-eyebrow">{mode === 'edit' ? 'Edit stop' : 'Watch a new stop'}</div>
+            <div id="modal-title" className="modal-title">
+              {mode === 'edit' ? 'Edit stop details' : 'Add a stop to watch'}
+            </div>
+          </div>
+          <button type="button" className="modal-close" aria-label="Close" onClick={onCancel}>
+            ×
+          </button>
+        </div>
+
+        <form className="modal-form" onSubmit={handleSubmit}>
+          <div className="field">
+            <label htmlFor="stopCode">Bus stop code</label>
+            <input
+              id="stopCode"
+              ref={firstFieldRef}
+              type="text"
+              value={stopCode}
+              onChange={(e) => setStopCode(e.target.value)}
+              placeholder="83139"
+              inputMode="numeric"
+              maxLength={5}
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="servicesText">Service numbers (optional)</label>
+            <input
+              id="servicesText"
+              type="text"
+              value={servicesText}
+              onChange={(e) => setServicesText(e.target.value)}
+              placeholder="15, 61"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="stopLabel">Label (optional)</label>
+            <input
+              id="stopLabel"
+              type="text"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Opp Blk 511"
+            />
+          </div>
+          {error && (
+            <p className="form-note" style={{ color: 'var(--red)' }}>
+              {error}
+            </p>
+          )}
+          <p className="form-note">
+            Leave service numbers blank to watch every service at this stop, or list a few separated by
+            commas to track several at once.
+          </p>
+          <div className="modal-actions">
+            <button type="button" className="secondary" onClick={onCancel} disabled={saving}>
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}>
+              {saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Add stop'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+const EMPTY_MODAL_FIELDS = { stopCode: '', servicesText: '', label: '' };
+
 export default function Page() {
   const [watches, setWatches] = useState([]);
   const [watchesLoaded, setWatchesLoaded] = useState(false);
   const [stopCache, setStopCache] = useState({});
-  const [stopCode, setStopCode] = useState('');
-  const [serviceNo, setServiceNo] = useState('');
-  const [label, setLabel] = useState('');
-  const [formError, setFormError] = useState('');
   const [now, setNow] = useState(new Date());
   const [nextRefreshAt, setNextRefreshAt] = useState(null);
+  const [modal, setModal] = useState(null); // { mode: 'add' | 'edit', code, initial }
   const stopCacheRef = useRef(stopCache);
   stopCacheRef.current = stopCache;
 
@@ -225,38 +346,65 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopCodesKey]);
 
-  async function handleAddWatch(e) {
-    e.preventDefault();
-    setFormError('');
-    const code = stopCode.trim();
-    if (!/^\d{3,5}$/.test(code)) {
-      setFormError('Bus stop codes are 3–5 digit numbers, e.g. 83139.');
-      return;
-    }
-    try {
+  // Creates one watch row per service number (or a single row with no
+  // service filter when the list is empty) and returns the created rows.
+  async function createWatches(stopCode, services, label) {
+    const serviceList = services.length > 0 ? services : [null];
+    const created = [];
+    for (const serviceNo of serviceList) {
       const res = await fetch('/api/watches', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stopCode: code, serviceNo, label }),
+        body: JSON.stringify({ stopCode, serviceNo: serviceNo || '', label }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setFormError(data.error || 'Could not save that stop.');
-        return;
-      }
-      setWatches((prev) => [...prev, data.watch]);
-      setStopCode('');
-      setServiceNo('');
-      setLabel('');
-    } catch (err) {
-      setFormError(err.message);
+      if (!res.ok) throw new Error(data.error || 'Could not save that stop.');
+      created.push(data.watch);
     }
+    return created;
+  }
+
+  async function deleteWatchesByIds(ids) {
+    await Promise.all(ids.map((id) => fetch(`/api/watches/${id}`, { method: 'DELETE' })));
+  }
+
+  function openAddModal() {
+    setModal({ mode: 'add', code: null, initial: EMPTY_MODAL_FIELDS });
+  }
+
+  function openEditModal(code, group) {
+    const labeled = group.find((w) => w.label);
+    setModal({
+      mode: 'edit',
+      code,
+      idsToReplace: group.map((w) => w.id),
+      initial: {
+        stopCode: code,
+        servicesText: group
+          .map((w) => w.service_no)
+          .filter(Boolean)
+          .join(', '),
+        label: labeled?.label || '',
+      },
+    });
+  }
+
+  async function handleModalSave({ stopCode, services, label }) {
+    if (modal.mode === 'edit') {
+      const created = await createWatches(stopCode, services, label);
+      await deleteWatchesByIds(modal.idsToReplace);
+      setWatches((prev) => [...prev.filter((w) => !modal.idsToReplace.includes(w.id)), ...created]);
+    } else {
+      const created = await createWatches(stopCode, services, label);
+      setWatches((prev) => [...prev, ...created]);
+    }
+    setModal(null);
   }
 
   async function removeStopGroup(code) {
     const toRemove = watches.filter((w) => w.stop_code === code);
     setWatches((prev) => prev.filter((w) => w.stop_code !== code));
-    await Promise.all(toRemove.map((w) => fetch(`/api/watches/${w.id}`, { method: 'DELETE' })));
+    await deleteWatchesByIds(toRemove.map((w) => w.id));
   }
 
   const order = [];
@@ -278,59 +426,18 @@ export default function Page() {
           <small>Singapore · live transit</small>
           The Departure Board
         </div>
-        <div className="masthead-meta">
-          <div className="clock">
-            {now.toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+        <div className="masthead-right">
+          <button type="button" className="add-stop-btn" onClick={openAddModal}>
+            + Add stop
+          </button>
+          <div className="masthead-meta">
+            <div className="clock">
+              {now.toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+            </div>
+            <div>{now.toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
           </div>
-          <div>{now.toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
         </div>
       </header>
-
-      <div className="section-label">Add a stop to watch</div>
-      <div className="panel">
-        <form className="add-form" onSubmit={handleAddWatch}>
-          <div className="field">
-            <label htmlFor="stopCode">Bus stop code</label>
-            <input
-              id="stopCode"
-              type="text"
-              value={stopCode}
-              onChange={(e) => setStopCode(e.target.value)}
-              placeholder="83139"
-              inputMode="numeric"
-              maxLength={5}
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="serviceNo">Service no (optional)</label>
-            <input
-              id="serviceNo"
-              type="text"
-              value={serviceNo}
-              onChange={(e) => setServiceNo(e.target.value)}
-              placeholder="15"
-              maxLength={6}
-            />
-          </div>
-          <div className="field grow">
-            <label htmlFor="stopLabel">Label (optional)</label>
-            <input
-              id="stopLabel"
-              type="text"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Opp Blk 511"
-            />
-          </div>
-          <button type="submit">Add stop</button>
-        </form>
-        {formError && <p className="form-note" style={{ color: 'var(--red)' }}>{formError}</p>}
-        <p className="form-note">
-          Leave service no blank to watch every service at that stop. Add the same stop again with a
-          different service to track several at once.
-        </p>
-      </div>
 
       <div className="refresh-strip">
         <div className="status">
@@ -349,12 +456,22 @@ export default function Page() {
       {watchesLoaded && watches.length === 0 && (
         <div className="empty">
           <h3>Nothing on the board yet</h3>
-          <p>Add a bus stop code above — with a service number if you&apos;re after one particular bus — to see live arrivals here.</p>
+          <p>
+            Add a bus stop code — with a service number if you&apos;re after one particular bus — to see
+            live arrivals here.
+          </p>
         </div>
       )}
 
       {order.map((code) => (
-        <StopGroup key={code} code={code} group={byStop[code]} stopCache={stopCache} onRemove={removeStopGroup} />
+        <StopGroup
+          key={code}
+          code={code}
+          group={byStop[code]}
+          stopCache={stopCache}
+          onRemove={removeStopGroup}
+          onEdit={openEditModal}
+        />
       ))}
 
       <footer>
@@ -362,6 +479,15 @@ export default function Page() {
         operators and can change. Your watch list is stored in Supabase; the LTA account key stays on the
         server and is never sent to your browser.
       </footer>
+
+      {modal && (
+        <StopModal
+          mode={modal.mode}
+          initial={modal.initial}
+          onCancel={() => setModal(null)}
+          onSave={handleModalSave}
+        />
+      )}
     </div>
   );
 }

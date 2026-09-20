@@ -50,6 +50,14 @@ header.masthead{
   color:var(--red);
   margin-bottom:6px;
 }
+.masthead-right{
+  display:flex;
+  align-items:center;
+  gap:18px;
+}
+.add-stop-btn{
+  white-space:nowrap;
+}
 .masthead-meta{
   text-align:right;
   font-size:13px;
@@ -204,6 +212,63 @@ td.num{text-align:right; font-family:'IBM Plex Mono', monospace; font-variant-nu
 .load-dot.unknown{background:#c7c9d1;}
 .row-error td{color:var(--meta); font-style:italic; font-size:13px;}
 
+.modal-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(21,23,28,0.45);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+  z-index:50;
+}
+.modal{
+  background:var(--paper);
+  border:1px solid var(--ink);
+  width:100%;
+  max-width:440px;
+  max-height:calc(100vh - 40px);
+  overflow-y:auto;
+  box-shadow:0 12px 32px rgba(21,23,28,0.28);
+}
+.modal-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  padding:20px 20px 14px;
+  border-bottom:1px solid var(--line);
+}
+.modal-title{
+  font-family:'Fraunces', serif;
+  font-weight:600;
+  font-size:21px;
+  margin-top:2px;
+}
+.modal-close{
+  background:transparent;
+  border:none;
+  color:var(--ink-soft);
+  font-size:22px;
+  line-height:1;
+  padding:2px 4px;
+}
+.modal-close:hover{background:transparent; color:var(--ink);}
+.modal-form{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  padding:18px 20px 20px;
+}
+.modal-form .field{width:100%;}
+.modal-form input[type=text]{width:100%;}
+.modal-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  margin-top:2px;
+}
+
 footer{
   margin-top:50px;
   padding-top:16px;
@@ -218,4 +283,7 @@ footer{
   form.add-form button{width:100%;}
   .field-row{flex-direction:column; align-items:stretch;}
   table.services{font-size:13px;}
+  .masthead{flex-direction:column; align-items:flex-start;}
+  .masthead-right{width:100%; justify-content:space-between;}
+  .modal-form{padding:16px;}
 }
